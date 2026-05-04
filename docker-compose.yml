@@ -1,0 +1,159 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Primary relational store
+  postgres:
+    image: postgres:16-alpine
+    container_name: ims-postgres
+    environment:
+      POSTGRES_DB: incident_management
+      POSTGRES_USER: ims_user
+      POSTGRES_PASSWORD: ims_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ims_user -d incident_management"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ims-network
+
+  # MongoDB - Raw signals and audit logs
+  mongo:
+    image: mongo:7.0
+    container_name: ims-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ims_mongo
+      MONGO_INITDB_ROOT_PASSWORD: ims_mongo_password
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ims-network
+
+  # Redis - Caching, rate limiting, debounce state
+  redis:
+    image: redis:7-alpine
+    container_name: ims-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ims-network
+
+  # Kafka + Zookeeper - Event streaming
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: ims-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    networks:
+      - ims-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: ims-kafka
+    depends_on:
+      zookeeper:
+        condition: service_started
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 6
+      KAFKA_LOG_RETENTION_HOURS: 168
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - ims-network
+
+  # Spring Boot Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ims-app
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/incident_management
+      SPRING_DATASOURCE_USERNAME: ims_user
+      SPRING_DATASOURCE_PASSWORD: ims_password
+      SPRING_DATA_MONGODB_URI: mongodb://ims_mongo:ims_mongo_password@mongo:27017/incident_management
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - ims-network
+    restart: unless-stopped
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ims-frontend
+    environment:
+      VITE_API_URL: http://app:8081
+    ports:
+      - "3000:3000"
+    depends_on:
+      - app
+    networks:
+      - ims-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  zookeeper_log:
+
+networks:
+  ims-network:
+    driver: bridge

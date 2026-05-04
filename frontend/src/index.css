@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-gray-50;
+}
+
+.severity-p0 { @apply bg-red-100 text-red-800 border-red-200; }
+.severity-p1 { @apply bg-orange-100 text-orange-800 border-orange-200; }
+.severity-p2 { @apply bg-yellow-100 text-yellow-800 border-yellow-200; }
+.severity-p3 { @apply bg-lime-100 text-lime-800 border-lime-200; }
+.severity-p4 { @apply bg-green-100 text-green-800 border-green-200; }
+
+.status-open { @apply bg-blue-100 text-blue-800; }
+.status-investigating { @apply bg-purple-100 text-purple-800; }
+.status-resolved { @apply bg-green-100 text-green-800; }
+.status-closed { @apply bg-gray-100 text-gray-800; }
