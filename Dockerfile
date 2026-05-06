@@ -5,6 +5,7 @@ WORKDIR /app
 
 # Copy Maven wrapper and pom.xml
 COPY mvnw mvnw.cmd pom.xml ./
+COPY .mvn .mvn
 COPY src ./src
 
 # Download dependencies and build
